@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 import csv
 import pandas as pd
 
+from sklearn.cluster import KMeans
 
 # ======================================================================================================
 # CLASSES
@@ -273,11 +274,11 @@ def discover_classes(data, numOfClasses=3):
     # Use any clustering procedure seems pertinent: k means with k = numOfclasses, z-type clustering etc
     # z-type: disover the mean and std and cluster according to distance from mean. It might lead to inaccurate classes.
     # One way to combat that is to perform it twice: one on all data above median and one on all data below.
-    
-    
-    
+    clf = KMeans(n_clusters=numOfClasses)
+    clf.fit(data)
+    centroids = clf.cluster_centers_
+    classes = np.array(clf.labels_)
     # ??????????????
-    
     # nd array
     return classes
 
@@ -412,12 +413,13 @@ def main():
     data = load_data(printData = True)
     # TASK 1
     # Discover classes
-    # classes = discover_classes(...)
+    classes = discover_classes(data, numOfClasses=3)
     # change data's charges to new classes.
-    
+
     # TASK 2
     # Create dataset according to parameter k
     dataSet = DATASET(data)
+    dataSet.substitute_last_col(numpy_to_tensor(classes))
     trainSet, valSet, evalSet = dataSet.create_k_fold_set(0.33, resetIdx = True)
     # TASK 3
     # Methods evaluation
