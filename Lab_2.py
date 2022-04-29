@@ -2,13 +2,13 @@ import torch
 import sklearn, sklearn.datasets, sklearn.model_selection
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 from sklearn.svm import SVC
 import numpy as np
 from matplotlib import pyplot as plt
 import csv
 import pandas as pd
 
-from sklearn.cluster import KMeans
 
 # ======================================================================================================
 # CLASSES
@@ -66,7 +66,7 @@ class DATASET():
     def __init__(self, data, normalizeData = False):
         self.data = data
         self.size = data.size()
-        self.idxs = {} # holds all the indexes of the samples yet to be put to the eval set
+        self.idxs = {} # holds all the indexes of the samples yet to be put to the eval set. One index sequence per k.
         self.numOfSamples = self.size[0]
         if normalizeData:
             self._normalize_Data()
@@ -106,6 +106,9 @@ class DATASET():
         print("Implement Data Normalization")
         
     def substitute_last_col(self, inCol):
+        ''' Call this function to change the last column of your data with the input. This is handy if the last col holds the targets
+            and you need to change the targets i.e from continuous to classes.
+        '''
         print(self.data.shape, inCol.shape)
         self.data[:,-1] = inCol
 # ======================================================================================================
@@ -122,7 +125,7 @@ def load_data(retType = 'tensor', printData = False):
     data = []
     
     # uSE PANDAS TO READ DATA
-    df = pd.read_csv ('insurance.csv')
+    df = pd.read_csv ('./insurance.csv')
     
     # convert all binary variables to 1,0
     df['sex'] = df['sex'].map(lambda sex: 1 if sex =='male' else 0)
@@ -261,27 +264,41 @@ def compute_priors(data):
 # TASK FUNCTION INTERFACES
 # ======================================================================================================
 
-def discover_classes(data, numOfClasses=3):
+def discover_classes(data, numOfClasses=3, getKmeans = False, save = False):
     ''' DESCRIPTION: THis function processes the input target data and clusters the cost values into three
                      distinct classes: Low: 0, Medium: 1, High: 2. It should return a numpy array or tensor
                      that transforms the contunous target column 'charges' into the above discrete labels.
         RETURNS classes (ndArray)-> Array that hold the class of each sample. Should be 1338x1.
     
     '''
-    classes = []
-    # YOUR CODE HERE
-    # ??????????????
-    # Use any clustering procedure seems pertinent: k means with k = numOfclasses, z-type clustering etc
-    # z-type: disover the mean and std and cluster according to distance from mean. It might lead to inaccurate classes.
-    # One way to combat that is to perform it twice: one on all data above median and one on all data below.
-    clf = KMeans(n_clusters=numOfClasses)
-    clf.fit(data)
-    centroids = clf.cluster_centers_
-    classes = np.array(clf.labels_)
-    # ??????????????
-    # nd array
-    return classes
 
+    if getKmeans:
+        return KMeans(n_clusters=numOfClasses, random_state=0).fit(data.numpy().reshape(-1,1)).labels_
+    
+    classes = torch.zeros(data.shape[0], 2)
+    median, mean, std = data.median(), data.mean(), data.std()
+    for i, t in enumerate(data):
+        if t < median-std/2:
+            classes[i,:] = torch.IntTensor([0,0])
+        elif t < mean + std:
+            if t> mean + 0.75 * std:
+                classes[i,:] = torch.IntTensor([1,2])
+            else:
+                classes[i,:] = torch.IntTensor([1,1])
+        else:
+            if t < mean + 1.25* std:
+                classes[i,:] = torch.IntTensor([1,2])
+            else:
+                classes[i,:] = torch.IntTensor([2,2])
+    classes = classes.numpy()[:,0].astype(int) 
+
+    if save:
+        t_np = classes.numpy() #convert to Numpy array
+        df = pd.DataFrame(t_np) #convert to a dataframe
+        df.to_csv("classFile",index=False) #save to file
+
+   
+    return classes
 # -----------------------------------------------------------------------------------------------    
 
 def methods_evaluation(dataSet, *args, k_folds = [0.33, 0.2], **kwargs):
@@ -293,9 +310,12 @@ def methods_evaluation(dataSet, *args, k_folds = [0.33, 0.2], **kwargs):
     retDict = {}
     
     for k in k_folds:
-        for k_fold in range(1/k):
-            print(k_fold)
-            trainSet, valSet, evalSet = dataSet.create_k_fold_set(k=0.1)
+        print("Splitting set into {} folds (K={})".format(int(1/k), k))
+        for k_fold in range(int(1/k)):
+            print("Fold {}/{}".froamt(k_fold, int(1/k)))
+            
+            resetIdx = True if k_fold == 0 else False
+            trainSet, valSet, evalSet = dataSet.create_k_fold_set(k=k, resetIdx = resetIdx)
             trainData, trainLabels = trainSet[:,:-1], trainSet[:,-1]
     # YOUR CODE HERE
     # ??????????????
@@ -313,9 +333,9 @@ def methods_evaluation(dataSet, *args, k_folds = [0.33, 0.2], **kwargs):
         # End of k_fold for loop
         # LOG ALL results for this k-fold strategy
         
-        # PLOT PERFORMANCE for all methods for this k-fold strategy
+    # PLOT PERFORMANCE for all methods for this k-fold strategy
     #???????????????
-        
+       
     return retDict
 
 
@@ -365,6 +385,7 @@ def positive_class_evaluation(dataSet, *args, **kwargs):
     # PART 1
     #-------
     # For all classifiers rerun the ones with the best parameters on the new dataset (with labels only 1 or 0)
+    k = kwargs['k'] if 'k' in kwargs.keys() else 0.33
     trainSet, valSet, evalSet = dataSet.create_k_fold_set(k, resetIdx = True)
     # Get Naive Bayes Results
 
@@ -410,17 +431,18 @@ def main():
     
     # TASK 0        
     # Load Data
-    data = load_data(printData = True)
+    data = load_data(printData = False)
     # TASK 1
     # Discover classes
-    classes = discover_classes(data, numOfClasses=3)
+    classes = discover_classes(data, numOfClasses=3,getKmeans = True,save = False)
     # change data's charges to new classes.
-
+    
     # TASK 2
     # Create dataset according to parameter k
     dataSet = DATASET(data)
-    dataSet.substitute_last_col(numpy_to_tensor(classes))
-    trainSet, valSet, evalSet = dataSet.create_k_fold_set(0.33, resetIdx = True)
+    #dataSet.substitute_last_col(numpy_to_tensor(classes))
+    print(dataSet.data[:,-1].shape)
+    discover_classes(dataSet.data[:,-1])
     # TASK 3
     # Methods evaluation
     # retDict = methods_evaluation(...)
